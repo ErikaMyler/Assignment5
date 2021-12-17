@@ -1,0 +1,315 @@
+---
+title: "Software Tools (BINF*6210) Assignment 5"
+author: "Erika Myler"
+date: "17/12/2021"
+output: pdf_document
+---
+
+GitHub link: https://github.com/ErikaMyler/Assignment5
+
+## Introduction 
+
+Modern microbiome research relies on software tools for the analysis of molecular data to infer microbial community compositions. DADA2 is a denoising and deduplication pipeline for microbiome analysis which generates amplicon sequence variants (ASVs; also exact sequence variants, ESVs) from Illumina-sequenced paired-end reads (Callahan et al. 2016). The DADA2 denoising algorithm has flexible parameters, allowing the user to set the number of nucleotides to trim from the 5' end and the length to truncate forward and reverse reads independently. In this project, I manipulate these parameters to assess and compare the performance of the DADA2 pipeline under two sets of conditions. Performance is defined as the success of recovering reads and identifying taxa present in a mock community.
+
+## Description of Data Set 
+
+Paired-end reads (2x300bp) were generated using the Illumina MiSeq instrument by Winand et al. (2020). The raw 16S10_V8_V9 and 16S10_V8_V9_NTC fastq.gz files were downloaded from the NCBI Sequence Read Archive (SRA) BioProject PRJNA587452. The files can be accessed here:
+
+#https://www.ncbi.nlm.nih.gov/Traces/study/?uids=9323659%2C9323657%2C9323658%2C9323656%2C9323655%2C9323654%2C9323653%2C9323652%2C9323651%2C9323650%2C9323649%2C9323648%2C9323647%2C9323646%2C9323645%2C9323644%2C9323643%2C9323642%2C9323641%2C9323639%2C9323638%2C9323637&o=acc_s%3Aa
+
+16S10_V8_V9 = sequenced amplicon (370 bp) spanning the V8 and V9 16S rRNA regions using the primer pair 1522F/1189R1
+
+16S10_V8_V9_NTC = no template control for 16S10_V8_V9
+
+## Code Section 1 - Data Acquisition, Exploration, Filtering, and Quality Control 
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=80), echo=FALSE, message=FALSE, results='hide', include=FALSE, linewidth=100}
+
+#Installing and loading packages
+
+library(Biostrings)
+library(stringr)
+library(dplyr)
+library(dada2)
+library(DECIPHER)
+#install.packages("EnvNJ")
+library(EnvNJ)
+library(ggplot2)
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+
+#Paired-end reads (2x300bp) were generated using the Illumina MiSeq instrument by Winand et al. (2020). The raw 16S10_V8_V9 and 16S10_V8_V9_NTC fastq.gz files were downloaded from the NCBI Sequence Read Archive (SRA) BioProject PRJNA587452.
+
+#16S10_V8_V9 = sequenced amplicon (370 bp) spanning the V8 and V9 16S rRNA regions using the primer pair 1522F/1189R1
+#16S10_V8_V9_NTC = no template control for 16S10_V8_V9
+
+#All fastq.gz files were demultiplexed (i.e., split into two separate files for forward and reverse reads) to faciliate analysis using dada2. Demultiplexing was conducted individually for each file using the split2 function in SeqKit (Shen et al. 2016) by running the following line in the command line:
+
+#C:\>seqkit split2 \Users\Erika\Downloads\sra_data1.fastq.gz -p 2 -O out -f
+#[INFO] split seqs from \Users\Erika\Downloads\sra_data1.fastq.gz
+#[INFO] split into 2 parts
+#[INFO] write 20841 sequences to file: out\sra_data1.part_001.fastq.gz
+#[INFO] write 20841 sequences to file: out\sra_data1.part_002.fastq.gz
+
+#sra_data1.part_001.fastq.gz = forward reads for 16S10_V8_V9
+#sra_data1.part_002.fastq.gz = reverse reads for 16S10_V8_V9
+
+#setting file path to the folder containing fastq.gz files
+
+path <- "./testData4"
+list.files(path)
+
+R1s <- sort(list.files(path, pattern=".part_001.fastq", full.names = TRUE))
+R2s <- sort(list.files(path, pattern=".part_002.fastq", full.names = TRUE))
+
+R1s
+R2s
+
+#extracting sample names
+
+sample.names <- sapply(strsplit(basename(R1s), ".part"), `[`, 1)
+sample.names
+
+plotQualityProfile(R1s[1:2])
+plotQualityProfile(R2s[1:2])
+
+#pre-setting file names for filtered sequences
+
+filtR1s <- file.path(path, "filtered", paste0(sample.names, "_R1_filt.fastq.gz"))
+filtR2s <- file.path(path, "filtered", paste0(sample.names, "_R2_filt.fastq.gz"))
+
+names(filtR1s) <- sample.names
+names(filtR2s) <- sample.names
+
+#filtering all sequences
+
+#out <- filterAndTrim(R1s, filtR1s, R2s, filtR2s, trimLeft=10, truncLen=c(290,220),
+                     #maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     #compress=TRUE, verbose=TRUE, multithread=FALSE)
+
+out <- filterAndTrim(R1s, filtR1s, R2s, filtR2s,
+                     maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                     compress=TRUE, verbose=TRUE, multithread=FALSE)
+
+head(out)
+
+#re-checking quality profiles
+
+plotQualityProfile(filtR1s[1:2])
+plotQualityProfile(filtR2s[1:2])
+
+#dereplicating
+
+derepR1s <- derepFastq(filtR1s, verbose=TRUE)
+derepR2s <- derepFastq(filtR2s, verbose=TRUE)
+
+class(derepR1s)
+class(derepR2s)
+
+#investigating dereplicated data
+#outputs from these investigations have been omitted to reduce the length of the pdf
+
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=80), message=FALSE, results='hide', linewidth=100}
+
+#unique sequences and number of reads for each
+
+for(i in sample.names) {
+  print(i)
+  print(derepR1s[[i]][1])
+}
+
+#sequences and read quality (Phred scores)
+
+for(i in sample.names) {
+  #print(i)
+  #print(derepR1s[[i]][2])
+}
+
+#sequence reads mapped to ESV (where each number represents which ESV the read is mapped to)
+
+for(i in sample.names) {
+  print(i)
+  print(derepR1s[[i]][3])
+}
+
+#summary of mapped reads to display min, mean, max, etc. no. reads mapped to each ESV
+
+for(i in sample.names) {
+  print(i)
+  print(lapply(derepR1s[[i]][3],summary))
+}
+
+```
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+#estimating error rates in forward and reverse reads across all samples
+
+errorR1s <- learnErrors(derepR1s, multithread = FALSE)
+errorR2s <- learnErrors(derepR2s, multithread = FALSE)
+
+errorR1s
+errorR2s
+
+#Plotting error rates to investigate success of error estimation. The black points should adhere to the black line and trend downwards with increasing quality score.
+
+plotErrors(errorR1s, nominalQ=TRUE)
+plotErrors(errorR2s, nominalQ=TRUE)
+```
+
+## Main Software Tools Description 
+
+DADA2 is a pipeline for denoising and deduplicating paired-end reads sequenced on an Illumina system (Callahan et al. 2016). This pipeline is highly regarded in the field of microbiome research and is capable of fine-grain resolution of taxa versus pipelines which rely on clustering methods Clustering pipelines generate operational taxonomic units (OTUs) often based on 97% sequence similarity, rather than ASVs, which retain the complexity of the sample by requiring 100% sequence similarity. I chose to investigate this pipeline using online tutorials for taxonomic assignment and assessment of performance with reference to a mock community to go beyond the DADA2 vignette.
+
+## Code Section 2 - Main Analysis  
+
+```{r, tidy=TRUE, tidy.opts=list(width.cutoff=80)}
+
+#running DADA2
+
+dadaR1s <- dada(derepR1s, err = errorR1s, multithread = FALSE)
+dadaR2s <- dada(derepR2s, err = errorR2s, multithread = FALSE)
+
+print(dadaR1s)
+print(dadaR2s)
+
+#merging paired reads
+
+merged <- mergePairs(dadaR1s, derepR1s, dadaR2s, derepR2s, verbose = TRUE)
+
+#creating sequence table to compare ESV counts across samples
+
+seqtab <- makeSequenceTable(merged)
+
+seqtab.nochim <- removeBimeraDenovo(seqtab, verbose=TRUE)
+
+class(seqtab.nochim)
+dim(seqtab.nochim)
+#View(seqtab.nochim)
+
+#track number of reads at each step of the pipeline
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaR1s, getN), sapply(dadaR2s, getN), sapply(merged, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedR1", "denoisedR2", "merged", "nonchim")
+rownames(track) <- sample.names
+track
+
+#evaluating accuracy of DADA2 for mock community
+
+mock <- seqtab.nochim["sra_data1",]
+
+mock <- sort(mock[mock>0], decreasing=TRUE)
+
+cat("DADA2 inferred", length(mock), "sample sequences present in the V8-V9 Mock community.\n")
+
+#comparing ESVs to fastas provided by Zymo
+
+path <- "./ZymoFASTAs"
+mock.ref <- getSequences(file.path(path, "ZymoMockCommunity.fasta"))
+match.ref <- sum(sapply(names(mock), function(x) any(grepl(x, mock.ref))))
+cat("Of those,", sum(match.ref), "were exact matches to the expected reference sequences.\n")
+
+#assigning taxonomy
+
+#convert ESVs to DNAStringSet
+
+dna <- DNAStringSet(getSequences(mock))
+dna
+
+names(dna) <- 1:length(dna)
+dna
+
+#loading training dataset
+
+load("./SILVA_SSU_r138_2019.RData")
+
+#assigning taxonomic ids to each ESV
+
+ids <- IdTaxa(dna, trainingSet, strand="both", processors=NULL, verbose=FALSE)
+
+#specifying which taxonomic ranks to display
+
+ranks <- c("domain", "phylum", "class", "order", "family", "genus", "species") # ranks of interest
+
+#converting the output to matrix which displays the id at each of the specified ranks (set as column names) for each ESV (set as row names)
+
+taxid <- t(sapply(ids, function(x) {
+  m <- match(ranks, x$rank)
+  taxa <- x$taxon[m]
+  taxa[startsWith(taxa, "unclassified_")] <- NA
+  taxa
+}))
+
+colnames(taxid) <- ranks
+rownames(taxid) <- getSequences(mock)
+
+View(taxid)
+
+taxid <- cbind(names(dna), taxid)
+
+View(taxid)
+
+#viewing the proportion of recovered reads for each member of the mock community
+
+#calculating proportion of reads mapped to each ESV (i.e. member of the mock community)
+
+no.reads <- unname(mock)
+no.reads
+
+prop.reads <- no.reads/(sum(no.reads))
+prop.reads
+
+#creating proportion table
+
+table <- as.data.frame(taxid[,1])
+View(table)
+
+prop.table <- cbind(table, prop.reads)
+names(prop.table) <- c("ESV_number", "Proportion_of_reads")
+View(prop.table)
+
+#plotting proportion table as stacked bar plot
+
+#creating a dummy column for sample id
+
+Sample_ID <- "V8V9"
+
+prop.table.plot <- cbind(prop.table, Sample_ID)
+View(prop.table.plot)
+
+ggplot(data=prop.table.plot, aes(x=Sample_ID, y=Proportion_of_reads, fill=ESV_number)) +
+  geom_col() +
+  geom_bar(position="stack", stat="identity", colour="black") +
+  xlab("Sample") +
+  ylab("Proportion of reads") +
+  guides(fill=guide_legend(title="ESV number")) +
+  ggtitle("Proportion of reads mapped to each ESV")
+```
+
+## Results and Discussion  
+
+In this investigation, DADA2 was not able to recover all members of the ZymoBiomics Microbial Community Standard. A maximum of four ASVs were recovered under both sets of parameters tested here. This outcome does not align with the known mock community (see https://files.zymoresearch.com/protocols/_d6300_zymobiomics_microbial_community_standard.pdf).
+
+This result may be expected given that Winand et al. (2020) recovered the least number of ASVs from the V8-V9 regions. The next step may involve an investigation of the V4-V6 regions which were reportedly more successful in recovering a higher number of ASVs (Winand et al. 2020).
+
+
+## References  
+
+https://bioconductor.org/packages/devel/bioc/vignettes/dada2/inst/doc/dada2-intro.html
+
+https://benjjneb.github.io/dada2/tutorial.html
+
+https://www.hadriengourle.com/tutorials/16S/
+  
+https://web.stanford.edu/class/bios221/Pune/Lectures/Lecture_Day1_dada2_workflow.pdf
+
+Callahan, B., McMurdie, P. & Holmes, S. Exact sequence variants should replace operational taxonomic units in marker-gene data analysis. ISME J 11, 2639–2643 (2017). https://doi.org/10.1038/ismej.2017.119
+
+Callahan, B., McMurdie, P., Rosen, M. et al. DADA2: High-resolution sample inference from Illumina amplicon data. Nat Methods 13, 581–583 (2016). https://doi.org/10.1038/nmeth.3869
+
+Shen W, Le S, Li Y, Hu F (2016) SeqKit: A Cross-Platform and Ultrafast Toolkit for FASTA/Q File Manipulation. PLOS ONE 11(10): e0163962. https://doi.org/10.1371/journal.pone.0163962
+
+Winand R, Bogaerts B, Hoffman S, Lefevre L, Delvoye M, Van Braekel J, Fu Q, Roosens NH, De Keersmaecker SC, Vanneste K. Targeting the 16S rRNA Gene for Bacterial Identification in Complex Mixed Samples: Comparative Evaluation of Second (Illumina) and Third (Oxford Nanopore Technologies) Generation Sequencing Technologies. International Journal of Molecular Sciences. 2020; 21(1):298. https://doi.org/10.3390/ijms21010298
